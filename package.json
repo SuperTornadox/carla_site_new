@@ -6,19 +6,35 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio",
+    "sync:wp-theme": "node scripts/sync-wp-theme.mjs",
+    "import:wp": "node scripts/import-wp.mjs",
+    "cleanup:public-uploads": "node scripts/cleanup-public-uploads.mjs"
+  },
+  "engines": {
+    "node": ">=20.9.0"
   },
   "dependencies": {
+    "@prisma/client": "^6.12.0",
+    "@vercel/blob": "^2.0.0",
+    "dotenv": "^17.2.3",
+    "iron-session": "^8.0.4",
+    "next": "14.2.35",
     "react": "^18",
     "react-dom": "^18",
-    "next": "14.2.35"
+    "zod": "^4.2.1"
   },
   "devDependencies": {
-    "typescript": "^5",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "eslint": "^8",
-    "eslint-config-next": "14.2.35"
+    "eslint-config-next": "14.2.35",
+    "prisma": "^6.12.0",
+    "typescript": "^5"
   }
 }

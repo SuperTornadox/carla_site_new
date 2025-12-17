@@ -1,0 +1,54 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ContentType {
+  PAGE
+  POST
+}
+
+enum ContentStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model ContentItem {
+  id          String        @id @default(cuid())
+  type        ContentType
+  legacyWpId  Int?
+  path        String        @unique
+  title       String
+  status      ContentStatus @default(DRAFT)
+  content     Json          @default("[]")
+  seoTitle    String?
+  seoDesc     String?
+  publishedAt DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([status])
+  @@index([type])
+}
+
+model SiteSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model MediaAsset {
+  id        String   @id @default(cuid())
+  sourceUrl String?  @unique
+  filename  String
+  url       String
+  mimeType  String?
+  bytes     Int?
+  width     Int?
+  height    Int?
+  createdAt DateTime @default(now())
+}

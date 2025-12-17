@@ -1,0 +1,14 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: carlasite
+      POSTGRES_PASSWORD: carlasite
+      POSTGRES_DB: carlasite
+    ports:
+      - "5888:5432"
+    volumes:
+      - carlasite_pg:/var/lib/postgresql/data
+
+volumes:
+  carlasite_pg:
