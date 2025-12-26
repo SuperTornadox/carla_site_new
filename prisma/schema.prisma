@@ -21,6 +21,7 @@ model ContentItem {
   id          String        @id @default(cuid())
   type        ContentType
   legacyWpId  Int?
+  legacyBodyClass String?
   path        String        @unique
   title       String
   status      ContentStatus @default(DRAFT)
@@ -44,6 +45,8 @@ model SiteSetting {
 model MediaAsset {
   id        String   @id @default(cuid())
   sourceUrl String?  @unique
+  provider  String?  @default("vercel-blob")
+  key       String?
   filename  String
   url       String
   mimeType  String?
@@ -51,4 +54,6 @@ model MediaAsset {
   width     Int?
   height    Int?
   createdAt DateTime @default(now())
+
+  @@index([provider])
 }

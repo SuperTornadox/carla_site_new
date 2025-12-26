@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "next dev -p 3100",
+    "build": "prisma generate && next build",
+    "start": "next start -p 3100",
     "lint": "next lint",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
@@ -13,12 +13,26 @@
     "db:studio": "prisma studio",
     "sync:wp-theme": "node scripts/sync-wp-theme.mjs",
     "import:wp": "node scripts/import-wp.mjs",
-    "cleanup:public-uploads": "node scripts/cleanup-public-uploads.mjs"
+    "backfill:bodyclass": "node scripts/backfill-legacy-body-classes.mjs",
+    "cleanup:public-uploads": "node scripts/cleanup-public-uploads.mjs",
+    "prune:blob": "node scripts/blob-prune.mjs",
+    "report:blob": "node scripts/blob-report.mjs",
+    "reset:media": "node scripts/reset-media-assets.mjs",
+    "e2e": "node scripts/e2e-with-pm2.mjs",
+    "parity:discover-urls": "node scripts/discover-legacy-blog-urls.mjs",
+    "parity:discover-root-urls": "node scripts/discover-legacy-root-urls.mjs",
+    "parity:test": "npx playwright test -c playwright.parity.config.ts",
+    "parity:styles": "node scripts/parity-style-report.mjs",
+    "parity": "node scripts/parity-with-pm2.mjs",
+    "sync:root-site": "node scripts/sync-root-site.mjs",
+    "migrate:3d-assets": "node scripts/migrate-3d-assets.mjs"
   },
   "engines": {
     "node": ">=20.9.0"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.953.0",
+    "@aws-sdk/lib-storage": "^3.953.0",
     "@prisma/client": "^6.12.0",
     "@vercel/blob": "^2.0.0",
     "dotenv": "^17.2.3",
@@ -34,6 +48,10 @@
     "@types/react-dom": "^18",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
+    "@playwright/test": "^1.55.0",
+    "playwright": "^1.55.0",
+    "pixelmatch": "^5.3.0",
+    "pngjs": "^7.0.0",
     "prisma": "^6.12.0",
     "typescript": "^5"
   }

@@ -42,7 +42,7 @@ function extractFirst(html, regex) {
 
 function extractAll(html, regex) {
   const matches = html.matchAll(regex);
-  return Array.from(matches, (m) => m[0]);
+  return Array.from(matches, (m) => ({ html: m[0], index: m.index ?? 0 }));
 }
 
 function extractUrlAttrs(html, attrName) {
@@ -66,6 +66,7 @@ async function main() {
   const headerHtml = extractFirst(homeHtml, /<header id="masthead"[\s\S]*?<\/header>/i);
   const footerHtml = extractFirst(homeHtml, /<footer id="colophon"[\s\S]*?<\/footer>/i);
   const styleBlocks = extractAll(homeHtml, /<style\b[^>]*>[\s\S]*?<\/style>/gi);
+  const themeIdx = homeHtml.indexOf("/wp-content/themes/freedom-pro/style.css");
 
   await ensureDir(path.join(process.cwd(), "public", "blog", "_fragments"));
   const headerOut = headerHtml ? headerHtml.replaceAll(WP_BASE_URL, "/blog") : null;
@@ -83,14 +84,34 @@ async function main() {
     );
   }
 
-  const inlineCss = styleBlocks
-    .map((s) => s.replace(/^<style\b[^>]*>/i, "").replace(/<\/style>\s*$/i, ""))
+  function stripStyleTag(raw) {
+    return raw.replace(/^<style\b[^>]*>/i, "").replace(/<\/style>\s*$/i, "");
+  }
+
+  const preCss = styleBlocks
+    .filter((s) => (themeIdx === -1 ? true : s.index < themeIdx))
+    .map((s) => stripStyleTag(s.html))
     .join("\n\n");
+
+  const postCss = styleBlocks
+    .filter((s) => (themeIdx === -1 ? false : s.index >= themeIdx))
+    .map((s) => stripStyleTag(s.html))
+    .join("\n\n");
+
+  const inlineCss = [preCss, postCss].filter(Boolean).join("\n\n").trim();
+
+  await fs.writeFile(path.join(process.cwd(), "public", "blog", "wp-inline.pre.css"), preCss);
+  await fs.writeFile(path.join(process.cwd(), "public", "blog", "wp-inline.post.css"), postCss);
   await fs.writeFile(path.join(process.cwd(), "public", "blog", "wp-inline.css"), inlineCss);
 
   const linkHrefs = extractUrlAttrs(homeHtml, "href")
     .map(normalizeToAbsolute)
     .filter((u) => u.startsWith(`${WP_BASE_URL}/wp-content/themes/freedom-pro/`));
+
+  const coreCss = [
+    `${WP_BASE_URL}/wp-includes/css/dist/block-library/style.min.css`,
+    `${WP_BASE_URL}/wp-includes/css/dist/block-library/theme.min.css`,
+  ];
 
   const scriptSrcs = extractUrlAttrs(homeHtml, "src")
     .map(normalizeToAbsolute)
@@ -100,7 +121,7 @@ async function main() {
         u.startsWith(`${WP_BASE_URL}/wp-includes/js/jquery/`),
     );
 
-  const assets = Array.from(new Set([...linkHrefs, ...scriptSrcs])).map((u) =>
+  const assets = Array.from(new Set([...linkHrefs, ...scriptSrcs, ...coreCss])).map((u) =>
     u.replace(/\?.*$/, ""),
   );
 
@@ -155,6 +176,16 @@ async function main() {
           update: { value: inlineCss },
           create: { key: "blog.inlineCss", value: inlineCss },
         });
+        await prisma.siteSetting.upsert({
+          where: { key: "blog.inlineCssPre" },
+          update: { value: preCss },
+          create: { key: "blog.inlineCssPre", value: preCss },
+        });
+        await prisma.siteSetting.upsert({
+          where: { key: "blog.inlineCssPost" },
+          update: { value: postCss },
+          create: { key: "blog.inlineCssPost", value: postCss },
+        });
         dbSeeded = true;
       } catch (err) {
         console.warn("Skipping DB seeding (database not reachable).");
@@ -176,6 +207,8 @@ async function main() {
         wrote: [
           "public/blog/_fragments/header.html",
           "public/blog/_fragments/footer.html",
+          "public/blog/wp-inline.pre.css",
+          "public/blog/wp-inline.post.css",
           "public/blog/wp-inline.css",
           path.relative(process.cwd(), localFaCssPath),
         ],

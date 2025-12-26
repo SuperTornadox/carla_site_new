@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import crypto from "node:crypto";
-import { env } from "@/lib/env";
+import { getAdminEnv } from "@/lib/env";
 import { getSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -17,16 +17,33 @@ export default async function AdminLoginPage({
 }: {
   searchParams?: { error?: string };
 }) {
+  try {
+    getAdminEnv();
+  } catch (err) {
+    return (
+      <main style={{ maxWidth: 720, margin: "40px auto", padding: 16 }}>
+        <h1>Admin not configured</h1>
+        <p style={{ color: "crimson" }}>
+          Admin auth requires <code>SESSION_PASSWORD</code> (min 32 chars),{" "}
+          <code>ADMIN_USERNAME</code>, and <code>ADMIN_PASSWORD</code>.
+        </p>
+        <pre style={{ whiteSpace: "pre-wrap" }}>{String(err)}</pre>
+      </main>
+    );
+  }
+
   const session = await getSession();
   if (session.isLoggedIn) redirect("/admin");
 
   async function loginAction(formData: FormData) {
     "use server";
+    const adminEnv = getAdminEnv();
     const username = String(formData.get("username") ?? "");
     const password = String(formData.get("password") ?? "");
 
     const ok =
-      safeEqual(username, env.ADMIN_USERNAME) && safeEqual(password, env.ADMIN_PASSWORD);
+      safeEqual(username, adminEnv.ADMIN_USERNAME) &&
+      safeEqual(password, adminEnv.ADMIN_PASSWORD);
     if (!ok) redirect("/admin/login?error=1");
 
     const s = await getSession();

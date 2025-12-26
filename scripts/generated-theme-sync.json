@@ -1,11 +1,13 @@
 {
   "wpBaseUrl": "https://carlagannis.com/blog",
   "homeUrl": "https://carlagannis.com/blog/",
-  "assetsDownloaded": 9,
+  "assetsDownloaded": 11,
   "dbSeeded": true,
   "wrote": [
     "public/blog/_fragments/header.html",
     "public/blog/_fragments/footer.html",
+    "public/blog/wp-inline.pre.css",
+    "public/blog/wp-inline.post.css",
     "public/blog/wp-inline.css",
     "public/blog/wp-content/themes/freedom-pro/fontawesome/css/font-awesome.min.css"
   ]

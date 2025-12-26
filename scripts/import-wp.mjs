@@ -3,6 +3,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 import { blobEnabled, ensureBlobForUploadUrl, rewriteUploadsInHtml } from "./lib/blob-media.mjs";
+import {
+  createS3ClientFromEnv,
+  ensureS3ForWpUploadUrl,
+  getS3BucketFromEnv,
+  rewriteWpUploadsInHtml,
+} from "./lib/s3-media.mjs";
 
 const prisma = new PrismaClient();
 
@@ -13,7 +19,7 @@ const WP_BASE_URL = (process.env.WP_BASE_URL || "https://carlagannis.com/blog").
 
 function getMediaMode() {
   const raw = String(process.env.MEDIA_MODE || "").trim().toLowerCase();
-  if (raw === "blob" || raw === "public" || raw === "none") return raw;
+  if (raw === "blob" || raw === "s3" || raw === "public" || raw === "none") return raw;
   return blobEnabled() ? "blob" : "public";
 }
 
@@ -99,6 +105,7 @@ async function getHomeWpPageId() {
 async function upsertContentItem({
   type,
   legacyWpId,
+  legacyBodyClass,
   path: contentPath,
   title,
   status,
@@ -106,12 +113,13 @@ async function upsertContentItem({
   seoTitle,
   seoDesc,
 }) {
-  const blocks = [{ type: "html", html }] as const;
+  const blocks = [{ type: "html", html }];
   await prisma.contentItem.upsert({
     where: { path: contentPath },
     update: {
       type,
       legacyWpId,
+      legacyBodyClass,
       title,
       status,
       content: blocks,
@@ -122,6 +130,7 @@ async function upsertContentItem({
     create: {
       type,
       legacyWpId,
+      legacyBodyClass,
       path: contentPath,
       title,
       status,
@@ -131,6 +140,20 @@ async function upsertContentItem({
       publishedAt: status === "PUBLISHED" ? new Date() : null,
     },
   });
+}
+
+async function fetchLegacyBodyClass(url) {
+  try {
+    const res = await fetch(url, { headers: { Accept: "text/html" } });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const m = html.match(/<body[^>]*class=\"([^\"]*)\"/i);
+    if (!m) return null;
+    const cls = String(m[1] || "").trim().replace(/\s+/g, " ");
+    return cls || null;
+  } catch {
+    return null;
+  }
 }
 
 async function main() {
@@ -152,10 +175,22 @@ async function main() {
     );
   }
 
+  let s3 = null;
+  let s3Bucket = null;
+  let s3Region = null;
+  if (mediaMode === "s3") {
+    s3 = createS3ClientFromEnv();
+    s3Bucket = getS3BucketFromEnv();
+    s3Region = process.env.AWS_REGION;
+    if (!s3Region) throw new Error("AWS_REGION is required for MEDIA_MODE=s3.");
+  }
+
   const useBlob = mediaMode === "blob";
+  const useS3 = mediaMode === "s3";
   const usePublic = mediaMode === "public";
   let uploadedToPublic = 0;
   let uploadedToBlob = 0;
+  let uploadedToS3 = 0;
   let rewrittenUploads = 0;
   const mediaMap = new Map(); // sourceUrl -> blobUrl
   const mediaUsedBy = new Map(); // sourceUrl -> Set(contentPath)
@@ -171,6 +206,8 @@ async function main() {
     const title = String(item.title?.rendered ?? "");
     const rendered = String(item.content?.rendered ?? "");
     let html = rewriteWpUrls(rendered);
+    const legacyBodyClass =
+      process.env.IMPORT_BODY_CLASS === "0" ? null : await fetchLegacyBodyClass(item.link);
 
     const yoast = item.yoast_head_json || {};
     const seoTitle = typeof yoast.title === "string" ? yoast.title : null;
@@ -198,9 +235,40 @@ async function main() {
       rewrittenUploads += rewritten.mapped.length;
     }
 
+    if (useS3) {
+      const rewritten = await rewriteWpUploadsInHtml({
+        html,
+        wpBaseUrl: WP_BASE_URL,
+        resolve: async (sourceUrl) => {
+          const res = await ensureS3ForWpUploadUrl({
+            prisma,
+            s3,
+            bucket: s3Bucket,
+            region: s3Region,
+            wpBaseUrl: WP_BASE_URL,
+            sourceUrl,
+          });
+          if (!res) return null;
+          if (res.created) uploadedToS3++;
+          return res.url;
+        },
+      });
+
+      html = rewritten.html;
+      for (const { sourceUrl, publicUrl } of rewritten.mapped) {
+        mediaMap.set(sourceUrl, publicUrl);
+        const key = sourceUrl;
+        const set = mediaUsedBy.get(key) ?? new Set();
+        set.add(finalPath || "(home)");
+        mediaUsedBy.set(key, set);
+      }
+      rewrittenUploads += rewritten.mapped.length;
+    }
+
     await upsertContentItem({
       type: item.__kind,
       legacyWpId: item.id,
+      legacyBodyClass,
       path: finalPath,
       title,
       status,
@@ -210,6 +278,7 @@ async function main() {
     });
 
     if (!useBlob) {
+      if (useS3) continue;
       if (!usePublic) continue;
       const urls = extractUploadUrls(rendered);
       for (const u of urls) {
@@ -230,6 +299,7 @@ async function main() {
         mediaMode,
         uploadsDownloadedToPublic: uploadedToPublic,
         uploadsUploadedToBlob: uploadedToBlob,
+        uploadsUploadedToS3: uploadedToS3,
         uploadsRewrittenInHtml: rewrittenUploads,
         homeWpPageId: homeId,
       },
@@ -238,7 +308,7 @@ async function main() {
     ),
   );
 
-  if (useBlob) {
+  if (useBlob || useS3) {
     const report = Array.from(mediaMap.entries())
       .sort((a, b) => a[0].localeCompare(b[0]))
       .map(([sourceUrl, blobUrl]) => ({

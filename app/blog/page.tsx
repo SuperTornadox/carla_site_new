@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import BlogBodyClass from "@/app/blog/BlogBodyClass";
+import HtmlContent from "@/app/blog/HtmlContent";
 import { getContentItemByPath } from "@/lib/content";
 import { getSession } from "@/lib/session";
 import type { Metadata } from "next";
@@ -22,10 +23,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function asContentBlock(value: unknown): ContentBlock | null {
   if (!isRecord(value)) return null;
-  if (value.type === "html" && typeof value.html === "string") {
+  // Back-compat: imported blocks may omit `type` and only provide `html`.
+  if ((value.type === undefined || value.type === "html") && typeof value.html === "string") {
     return { type: "html", html: value.html };
   }
-  if (value.type === "image" && typeof value.src === "string") {
+  // Back-compat: allow `{ src: string }` without a `type`.
+  if ((value.type === "image" || value.type === undefined) && typeof value.src === "string") {
     return {
       type: "image",
       src: value.src,
@@ -53,19 +56,39 @@ function renderBlocksToHtml(blocks: unknown) {
     .join("\n");
 }
 
+function sanitizeWpContentHtml(html: string) {
+  return (
+    html
+      // We only migrate originals; WordPress `srcset` references size variants we don't serve.
+      .replace(/\s+srcset=(["'])[\s\S]*?\1/gi, "")
+      .replace(/\s+sizes=(["'])[\s\S]*?\1/gi, "")
+      // Add lazy loading and async decoding to all images for better performance
+      .replace(/<img\s+/gi, '<img loading="lazy" decoding="async" ')
+  );
+}
+
 export default async function BlogHomePage({
   searchParams,
 }: {
   searchParams?: { preview?: string };
 }) {
-  const session = await getSession();
-  const includeDraft = searchParams?.preview === "1" && session.isLoggedIn;
+  let includeDraft = false;
+  if (searchParams?.preview === "1") {
+    try {
+      const session = await getSession();
+      includeDraft = session.isLoggedIn;
+    } catch {
+      includeDraft = false;
+    }
+  }
 
   const item = await getContentItemByPath("", { includeDraft });
   if (!item) notFound();
 
-  const bodyClass = buildBodyClass(item.legacyWpId);
-  const innerHtml = renderBlocksToHtml(item.content);
+  const bodyClass = item.legacyBodyClass?.trim()
+    ? item.legacyBodyClass
+    : buildBodyClass(item.legacyWpId);
+  const innerHtml = sanitizeWpContentHtml(renderBlocksToHtml(item.content));
 
   const articleHtml = `
 <article id="post-${item.legacyWpId ?? "0"}" class="post-${
@@ -82,7 +105,7 @@ export default async function BlogHomePage({
   return (
     <>
       <BlogBodyClass className={bodyClass} />
-      <div dangerouslySetInnerHTML={{ __html: articleHtml }} />
+      <HtmlContent html={articleHtml} />
     </>
   );
 }
@@ -92,8 +115,15 @@ export async function generateMetadata({
 }: {
   searchParams?: { preview?: string };
 }): Promise<Metadata> {
-  const session = await getSession();
-  const includeDraft = searchParams?.preview === "1" && session.isLoggedIn;
+  let includeDraft = false;
+  if (searchParams?.preview === "1") {
+    try {
+      const session = await getSession();
+      includeDraft = session.isLoggedIn;
+    } catch {
+      includeDraft = false;
+    }
+  }
   const item = await getContentItemByPath("", { includeDraft });
   if (!item) return {};
   return {

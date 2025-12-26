@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import BlogBodyClass from "@/app/blog/BlogBodyClass";
+import HtmlContent from "@/app/blog/HtmlContent";
 import { getContentItemByPath } from "@/lib/content";
 import { getSession } from "@/lib/session";
 import type { Metadata } from "next";
@@ -9,7 +10,8 @@ export const dynamic = "force-dynamic";
 function buildBodyClass(kind: "page" | "post", legacyWpId?: number | null) {
   const base =
     "custom-background wp-embed-responsive wp-theme-freedom-pro no-sidebar-full-width wide";
-  const prefix = kind === "post" ? "single single-post" : "wp-singular page";
+  const prefix =
+    kind === "post" ? "single single-post" : "wp-singular page-template-default page";
   return legacyWpId ? `${prefix} ${base} page-id-${legacyWpId}` : `${prefix} ${base}`;
 }
 
@@ -23,10 +25,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function asContentBlock(value: unknown): ContentBlock | null {
   if (!isRecord(value)) return null;
-  if (value.type === "html" && typeof value.html === "string") {
+  // Back-compat: imported blocks may omit `type` and only provide `html`.
+  if ((value.type === undefined || value.type === "html") && typeof value.html === "string") {
     return { type: "html", html: value.html };
   }
-  if (value.type === "image" && typeof value.src === "string") {
+  // Back-compat: allow `{ src: string }` without a `type`.
+  if ((value.type === "image" || value.type === undefined) && typeof value.src === "string") {
     return {
       type: "image",
       src: value.src,
@@ -54,6 +58,17 @@ function renderBlocksToHtml(blocks: unknown) {
     .join("\n");
 }
 
+function sanitizeWpContentHtml(html: string) {
+  return (
+    html
+      // We only migrate originals; WordPress `srcset` references size variants we don't serve.
+      .replace(/\s+srcset=(["'])[\s\S]*?\1/gi, "")
+      .replace(/\s+sizes=(["'])[\s\S]*?\1/gi, "")
+      // Add lazy loading and async decoding to all images for better performance
+      .replace(/<img\s+/gi, '<img loading="lazy" decoding="async" ')
+  );
+}
+
 export default async function BlogCatchAllPage({
   params,
   searchParams,
@@ -61,16 +76,25 @@ export default async function BlogCatchAllPage({
   params: { path: string[] };
   searchParams?: { preview?: string };
 }) {
-  const session = await getSession();
-  const includeDraft = searchParams?.preview === "1" && session.isLoggedIn;
+  let includeDraft = false;
+  if (searchParams?.preview === "1") {
+    try {
+      const session = await getSession();
+      includeDraft = session.isLoggedIn;
+    } catch {
+      includeDraft = false;
+    }
+  }
   const path = params.path.join("/");
 
   const item = await getContentItemByPath(path, { includeDraft });
   if (!item) notFound();
 
   const kind = item.type === "POST" ? "post" : "page";
-  const bodyClass = buildBodyClass(kind, item.legacyWpId);
-  const innerHtml = renderBlocksToHtml(item.content);
+  const bodyClass = item.legacyBodyClass?.trim()
+    ? item.legacyBodyClass
+    : buildBodyClass(kind, item.legacyWpId);
+  const innerHtml = sanitizeWpContentHtml(renderBlocksToHtml(item.content));
 
   const legacyId = item.legacyWpId ?? "0";
   const status = item.status.toLowerCase();
@@ -89,7 +113,7 @@ export default async function BlogCatchAllPage({
   return (
     <>
       <BlogBodyClass className={bodyClass} />
-      <div dangerouslySetInnerHTML={{ __html: articleHtml }} />
+      <HtmlContent html={articleHtml} />
     </>
   );
 }
@@ -101,8 +125,15 @@ export async function generateMetadata({
   params: { path: string[] };
   searchParams?: { preview?: string };
 }): Promise<Metadata> {
-  const session = await getSession();
-  const includeDraft = searchParams?.preview === "1" && session.isLoggedIn;
+  let includeDraft = false;
+  if (searchParams?.preview === "1") {
+    try {
+      const session = await getSession();
+      includeDraft = session.isLoggedIn;
+    } catch {
+      includeDraft = false;
+    }
+  }
   const path = params.path.join("/");
   const item = await getContentItemByPath(path, { includeDraft });
   if (!item) return {};
